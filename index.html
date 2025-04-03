@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>آيات - تطبيق حفظ القرآن الكريم</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Firebase SDK v9 -->
+    <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-analytics-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-storage-compat.js"></script>
     <style>
         :root {
             --primary-color: #2c3e50;
@@ -249,6 +249,20 @@
             line-height: 1.6;
         }
 
+        .verse-image {
+            width: 100%;
+            max-height: 200px;
+            object-fit: contain;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border: 1px solid var(--border-color);
+            background-color: #f9f9f9;
+        }
+
+        [data-theme="dark"] .verse-image {
+            background-color: #555;
+        }
+
         .verse-actions {
             display: flex;
             justify-content: space-between;
@@ -359,6 +373,13 @@
             justify-content: flex-end;
             gap: 10px;
             margin-top: 20px;
+        }
+
+        .image-preview {
+            max-width: 100%;
+            max-height: 200px;
+            margin-top: 10px;
+            display: none;
         }
 
         .empty-state {
@@ -524,6 +545,12 @@
                     <input type="text" id="verseNumbers" placeholder="مثال: 1-5 أو 42">
                 </div>
                 <div class="form-group">
+                    <label for="verseImage">صورة الآية (اختياري)</label>
+                    <input type="file" id="verseImage" accept="image/*">
+                    <img id="imagePreview" class="image-preview" alt="معاينة الصورة">
+                    <input type="hidden" id="currentImageUrl">
+                </div>
+                <div class="form-group">
                     <label for="verseStatus">حالة الحفظ</label>
                     <select id="verseStatus" required>
                         <option value="pending">قيد الحفظ</option>
@@ -569,7 +596,7 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Firebase configuration - تم تحديثها بالبيانات التي قدمتها
+            // Firebase configuration
             const firebaseConfig = {
                 apiKey: "AIzaSyCoAixyqXO4nPapkhe0KUXGEJVgLZedHv4",
                 authDomain: "ayat-8d3d0.firebaseapp.com",
@@ -578,14 +605,14 @@
                 messagingSenderId: "201289603281",
                 appId: "1:201289603281:web:17f89c18272290a068cdf0",
                 measurementId: "G-0Y471DLJQK",
-                databaseURL: "https://ayat-8d3d0-default-rtdb.firebaseio.com" // أضفت هذا بناءً على اسم المشروع
+                databaseURL: "https://ayat-8d3d0-default-rtdb.firebaseio.com"
             };
 
             // Initialize Firebase
             const app = firebase.initializeApp(firebaseConfig);
             const database = firebase.database();
             const auth = firebase.auth();
-            const analytics = firebase.analytics();
+            const storage = firebase.storage();
 
             // عناصر DOM
             const themeToggle = document.getElementById('themeToggle');
@@ -607,6 +634,9 @@
             const authForm = document.getElementById('authForm');
             const authSubmitBtn = document.getElementById('authSubmitBtn');
             const authMessage = document.getElementById('authMessage');
+            const verseImageInput = document.getElementById('verseImage');
+            const imagePreview = document.getElementById('imagePreview');
+            const currentImageUrl = document.getElementById('currentImageUrl');
             
             // عناصر الإحصائيات
             const totalVersesEl = document.getElementById('totalVerses');
@@ -622,6 +652,7 @@
             let isEditMode = false;
             let currentEditId = null;
             let currentUser = null;
+            let currentImageFile = null;
             
             // تحميل البيانات من localStorage
             function loadVerses() {
@@ -668,6 +699,7 @@
                                 </span>
                             </div>
                             <div class="verse-text">${verse.text}</div>
+                            ${verse.imageUrl ? `<img src="${verse.imageUrl}" class="verse-image" alt="صورة الآية">` : ''}
                             <div class="verse-actions">
                                 <div>
                                     ${verse.notes ? '<i class="fas fa-sticky-note" title="' + verse.notes + '"></i>' : ''}
@@ -736,6 +768,9 @@
                 currentEditId = null;
                 modalTitle.textContent = 'إضافة آية جديدة';
                 verseForm.reset();
+                imagePreview.style.display = 'none';
+                currentImageUrl.value = '';
+                currentImageFile = null;
                 verseModal.style.display = 'flex';
                 document.getElementById('verseText').focus();
             }
@@ -756,12 +791,37 @@
                     document.getElementById('verseStatus').value = verse.status;
                     document.getElementById('verseNotes').value = verse.notes || '';
                     
+                    if (verse.imageUrl) {
+                        currentImageUrl.value = verse.imageUrl;
+                        imagePreview.src = verse.imageUrl;
+                        imagePreview.style.display = 'block';
+                    } else {
+                        imagePreview.style.display = 'none';
+                    }
+                    
                     verseModal.style.display = 'flex';
                 }
             }
             
+            // رفع الصورة إلى Firebase Storage
+            async function uploadImage(file, verseId) {
+                if (!file || !currentUser) return null;
+                
+                const storageRef = storage.ref();
+                const imageRef = storageRef.child(`users/${currentUser.uid}/verses/${verseId}/${file.name}`);
+                
+                try {
+                    const snapshot = await imageRef.put(file);
+                    const downloadURL = await snapshot.ref.getDownloadURL();
+                    return downloadURL;
+                } catch (error) {
+                    console.error('Error uploading image:', error);
+                    return null;
+                }
+            }
+            
             // حفظ آية (إضافة/تعديل)
-            function saveVerse(e) {
+            async function saveVerse(e) {
                 e.preventDefault();
                 
                 const verseText = document.getElementById('verseText').value.trim();
@@ -776,10 +836,17 @@
                     return;
                 }
                 
+                // إذا كان في وضع التعديل
                 if (isEditMode) {
-                    // تعديل آية موجودة
                     const index = verses.findIndex(v => v.id === currentEditId);
                     if (index !== -1) {
+                        let imageUrl = currentImageUrl.value;
+                        
+                        // إذا تم اختيار صورة جديدة
+                        if (currentImageFile) {
+                            imageUrl = await uploadImage(currentImageFile, currentEditId);
+                        }
+                        
                         verses[index] = {
                             id: currentEditId,
                             text: verseText,
@@ -787,12 +854,20 @@
                             surah: surahName,
                             numbers: verseNumbers,
                             status: verseStatus,
-                            notes: verseNotes
+                            notes: verseNotes,
+                            imageUrl: imageUrl || verses[index].imageUrl
                         };
                     }
                 } else {
                     // إضافة آية جديدة
                     const newId = verses.length > 0 ? Math.max(...verses.map(v => v.id)) + 1 : 1;
+                    let imageUrl = null;
+                    
+                    // إذا تم اختيار صورة
+                    if (currentImageFile) {
+                        imageUrl = await uploadImage(currentImageFile, newId);
+                    }
+                    
                     verses.push({
                         id: newId,
                         text: verseText,
@@ -800,7 +875,8 @@
                         surah: surahName,
                         numbers: verseNumbers,
                         status: verseStatus,
-                        notes: verseNotes
+                        notes: verseNotes,
+                        imageUrl: imageUrl
                     });
                 }
                 
@@ -810,8 +886,19 @@
             }
             
             // حذف آية
-            function deleteVerse(id) {
+            async function deleteVerse(id) {
                 if (confirm('هل أنت متأكد من حذف هذه الآية؟')) {
+                    // حذف الصورة من Storage إذا كانت موجودة
+                    const verse = verses.find(v => v.id === id);
+                    if (verse && verse.imageUrl && currentUser) {
+                        try {
+                            const imageRef = storage.refFromURL(verse.imageUrl);
+                            await imageRef.delete();
+                        } catch (error) {
+                            console.error('Error deleting image:', error);
+                        }
+                    }
+                    
                     verses = verses.filter(v => v.id !== id);
                     saveVersesToLocal();
                     renderVerses(verses);
@@ -911,7 +998,7 @@
             }
             
             // مزامنة البيانات مع Firebase
-            function syncData() {
+            async function syncData() {
                 if (!currentUser) {
                     alert('يجب تسجيل الدخول أولاً للمزامنة');
                     return;
@@ -924,25 +1011,37 @@
                 const userId = currentUser.uid;
                 const versesRef = database.ref(`users/${userId}/verses`);
                 
-                versesRef.set(verses)
-                    .then(() => {
-                        syncStatus.textContent = 'تمت المزامنة';
-                        syncStatus.className = 'sync-status sync-success';
-                        setTimeout(() => {
-                            syncStatus.style.display = 'none';
-                        }, 3000);
-                        analytics.logEvent('sync_completed');
-                    })
-                    .catch((error) => {
-                        syncStatus.textContent = 'خطأ في المزامنة';
-                        syncStatus.className = 'sync-status sync-error';
-                        console.error('Error syncing data:', error);
-                        analytics.logEvent('sync_failed', { error: error.message });
-                    });
+                try {
+                    // رفع البيانات إلى Firebase
+                    await versesRef.set(verses);
+                    
+                    // رفع الصور إلى Storage إذا لم تكن موجودة
+                    for (const verse of verses) {
+                        if (verse.imageUrl && !verse.imageUrl.startsWith('https://')) {
+                            // إذا كانت الصورة محلية (base64) يتم رفعها
+                            const response = await fetch(verse.imageUrl);
+                            const blob = await response.blob();
+                            const imageUrl = await uploadImage(blob, verse.id);
+                            if (imageUrl) {
+                                verse.imageUrl = imageUrl;
+                            }
+                        }
+                    }
+                    
+                    syncStatus.textContent = 'تمت المزامنة';
+                    syncStatus.className = 'sync-status sync-success';
+                    setTimeout(() => {
+                        syncStatus.style.display = 'none';
+                    }, 3000);
+                } catch (error) {
+                    syncStatus.textContent = 'خطأ في المزامنة';
+                    syncStatus.className = 'sync-status sync-error';
+                    console.error('Error syncing data:', error);
+                }
             }
             
             // جلب البيانات من Firebase
-            function fetchData() {
+            async function fetchData() {
                 if (!currentUser) return;
                 
                 syncStatus.textContent = 'جاري جلب البيانات...';
@@ -952,34 +1051,54 @@
                 const userId = currentUser.uid;
                 const versesRef = database.ref(`users/${userId}/verses`);
                 
-                versesRef.once('value')
-                    .then((snapshot) => {
-                        const data = snapshot.val();
-                        if (data) {
-                            verses = data;
-                            saveVersesToLocal();
-                            renderVerses(verses);
-                            syncStatus.textContent = 'تم جلب البيانات';
-                            syncStatus.className = 'sync-status sync-success';
-                            setTimeout(() => {
-                                syncStatus.style.display = 'none';
-                            }, 3000);
-                            analytics.logEvent('data_fetched');
-                        } else {
-                            syncStatus.textContent = 'لا توجد بيانات على السحابة';
-                            syncStatus.className = 'sync-status sync-warning';
-                            setTimeout(() => {
-                                syncStatus.style.display = 'none';
-                            }, 3000);
-                        }
-                    })
-                    .catch((error) => {
-                        syncStatus.textContent = 'خطأ في جلب البيانات';
-                        syncStatus.className = 'sync-status sync-error';
-                        console.error('Error fetching data:', error);
-                        analytics.logEvent('fetch_failed', { error: error.message });
-                    });
+                try {
+                    const snapshot = await versesRef.once('value');
+                    const data = snapshot.val();
+                    
+                    if (data) {
+                        verses = data;
+                        saveVersesToLocal();
+                        renderVerses(verses);
+                        
+                        syncStatus.textContent = 'تم جلب البيانات';
+                        syncStatus.className = 'sync-status sync-success';
+                        setTimeout(() => {
+                            syncStatus.style.display = 'none';
+                        }, 3000);
+                    } else {
+                        syncStatus.textContent = 'لا توجد بيانات على السحابة';
+                        syncStatus.className = 'sync-status sync-warning';
+                        setTimeout(() => {
+                            syncStatus.style.display = 'none';
+                        }, 3000);
+                    }
+                } catch (error) {
+                    syncStatus.textContent = 'خطأ في جلب البيانات';
+                    syncStatus.className = 'sync-status sync-error';
+                    console.error('Error fetching data:', error);
+                }
             }
+            
+            // معاينة الصورة قبل الرفع
+            verseImageInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    currentImageFile = file;
+                    const reader = new FileReader();
+                    
+                    reader.onload = function(event) {
+                        imagePreview.src = event.target.result;
+                        imagePreview.style.display = 'block';
+                        currentImageUrl.value = event.target.result;
+                    };
+                    
+                    reader.readAsDataURL(file);
+                } else {
+                    imagePreview.style.display = 'none';
+                    currentImageUrl.value = '';
+                    currentImageFile = null;
+                }
+            });
             
             // Event Listeners
             addVerseBtn.addEventListener('click', openAddVerseModal);
@@ -1019,9 +1138,6 @@
             initTheme();
             loadVerses();
             updateAuthUI();
-            
-            // تسجيل حدث بدء التطبيق
-            analytics.logEvent('app_started');
         });
     </script>
 </body>
