@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>آيات - تطبيق حفظ القرآن الكريم</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Firebase SDK -->
@@ -22,6 +22,7 @@
             --warning-color: #f39c12;
             --danger-color: #e74c3c;
             --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --input-font-size: 16px;
         }
 
         [data-theme="dark"] {
@@ -43,12 +44,14 @@
             box-sizing: border-box;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             transition: background-color 0.3s, color 0.3s;
+            -webkit-text-size-adjust: 100%;
         }
 
         body {
             background-color: var(--bg-color);
             color: var(--text-color);
             min-height: 100vh;
+            touch-action: manipulation;
         }
 
         .container {
@@ -160,6 +163,7 @@
             border-radius: 5px;
             background-color: var(--card-bg);
             color: var(--text-color);
+            font-size: var(--input-font-size);
         }
 
         .search-box i {
@@ -179,6 +183,7 @@
             display: flex;
             align-items: center;
             gap: 5px;
+            font-size: var(--input-font-size);
         }
 
         .btn-primary {
@@ -263,6 +268,8 @@
             border-radius: 5px;
             cursor: pointer;
             border: 1px solid var(--border-color);
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
 
         .verse-image-full {
@@ -313,6 +320,8 @@
             color: var(--secondary-color);
             cursor: pointer;
             font-size: 14px;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
 
         .modal {
@@ -378,6 +387,7 @@
             border-radius: 5px;
             background-color: var(--card-bg);
             color: var(--text-color);
+            font-size: var(--input-font-size) !important;
         }
 
         .form-group textarea {
@@ -540,6 +550,38 @@
                 width: 100%;
                 justify-content: space-between;
             }
+
+            :root {
+                --input-font-size: 14px;
+            }
+
+            .stat-card p {
+                font-size: 20px;
+            }
+
+            .verse-text, .verse-surah {
+                font-size: 15px;
+            }
+
+            .modal-content {
+                width: 95%;
+                padding: 15px;
+            }
+
+            .form-group input,
+            .form-group textarea,
+            .form-group select {
+                padding: 12px 10px;
+            }
+        }
+
+        input, textarea, select {
+            font-size: var(--input-font-size) !important;
+        }
+
+        button, .action-btn, .verse-image-thumbnail {
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
     </style>
 </head>
@@ -765,7 +807,6 @@
                 if (savedVerses) {
                     verses = JSON.parse(savedVerses);
                 } else {
-                    // تحميل البيانات الأولية من الملف الذي أرسلته
                     verses = [];
                     saveVersesToLocal();
                 }
@@ -914,7 +955,7 @@
                     document.getElementById('verseText').value = verse.text;
                     document.getElementById('verseName').value = verse.name;
                     document.getElementById('surahName').value = verse.surah;
-                    document.getElementById('verseNumbers').value = verse.numbers;
+                    document.getElementById('verseNumbers').value = verse.numbers || '';
                     document.getElementById('verseStatus').value = verse.status;
                     
                     // عرض الصور الحالية
@@ -923,8 +964,11 @@
                     currentImageUrls = [];
                     
                     if (verse.images && verse.images.length > 0) {
-                        currentImageUrls = [...verse.images];
-                        verse.images.forEach((imgUrl, index) => {
+                        currentImageUrls = verse.images.filter(img => 
+                            typeof img === 'string' && (img.startsWith('http') || img.startsWith('data:image'))
+                        );
+                        
+                        currentImageUrls.forEach((imgUrl, index) => {
                             addImageToPreview(imgUrl, index);
                         });
                     }
@@ -960,7 +1004,7 @@
             function removeImageFromPreview(index) {
                 if (index < currentImageUrls.length) {
                     currentImageUrls.splice(index, 1);
-                }
+                } 
                 if (index < currentImageFiles.length) {
                     currentImageFiles.splice(index, 1);
                 }
@@ -973,15 +1017,28 @@
                 currentImageUrls.forEach((imgUrl, index) => {
                     addImageToPreview(imgUrl, index);
                 });
+                
+                currentImageFiles.forEach((file, index) => {
+                    if (file instanceof File) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            addImageToPreview(e.target.result, currentImageUrls.length + index);
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                });
             }
             
             // رفع الصور إلى Firebase Storage
             async function uploadImages(files, verseId) {
                 if (!files || files.length === 0 || !currentUser) return [];
                 
-                const uploadPromises = Array.from(files).map(async (file, index) => {
+                const uploadPromises = Array.from(files).map(async (file) => {
+                    if (!(file instanceof File)) return null;
+                    
                     const storageRef = storage.ref();
-                    const imageRef = storageRef.child(`users/${currentUser.uid}/verses/${verseId}/${Date.now()}_${file.name}`);
+                    const uniqueName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${file.name}`;
+                    const imageRef = storageRef.child(`users/${currentUser.uid}/verses/${verseId}/${uniqueName}`);
                     
                     try {
                         const snapshot = await imageRef.put(file);
@@ -1003,8 +1060,10 @@
                 
                 const deletePromises = urls.map(async (url) => {
                     try {
-                        const imageRef = storage.refFromURL(url);
-                        await imageRef.delete();
+                        if (typeof url === 'string' && url.startsWith('http')) {
+                            const imageRef = storage.refFromURL(url);
+                            await imageRef.delete();
+                        }
                     } catch (error) {
                         console.error('Error deleting image:', error);
                     }
@@ -1028,47 +1087,91 @@
                     return;
                 }
                 
-                // رفع الصور الجديدة إذا وجدت
-                let newImageUrls = [];
-                if (currentImageFiles.length > 0) {
-                    newImageUrls = await uploadImages(currentImageFiles, isEditMode ? currentEditId : (verses.length > 0 ? Math.max(...verses.map(v => v.id)) + 1 : 1));
-                }
+                // عرض مؤشر تحميل
+                const saveBtn = document.getElementById('saveBtn');
+                const originalBtnText = saveBtn.innerHTML;
+                saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+                saveBtn.disabled = true;
                 
-                // إذا كان في وضع التعديل
-                if (isEditMode) {
-                    const index = verses.findIndex(v => v.id === currentEditId);
-                    if (index !== -1) {
-                        // دمج الصور القديمة (التي لم يتم حذفها) مع الجديدة
-                        const finalImages = [...currentImageUrls, ...newImageUrls];
+                try {
+                    // رفع الصور الجديدة إذا وجدت
+                    let newImageUrls = [];
+                    if (currentImageFiles.length > 0) {
+                        if (!currentUser) {
+                            // إذا لم يكن المستخدم مسجل الدخول، نستخدم الصور المحلية فقط
+                            newImageUrls = await Promise.all(
+                                Array.from(currentImageFiles).map(file => {
+                                    return new Promise((resolve) => {
+                                        const reader = new FileReader();
+                                        reader.onload = (e) => resolve(e.target.result);
+                                        reader.readAsDataURL(file);
+                                    });
+                                })
+                            );
+                        } else {
+                            // إذا كان المستخدم مسجل الدخول، نرفع الصور إلى Firebase
+                            newImageUrls = await uploadImages(currentImageFiles, isEditMode ? currentEditId : (verses.length > 0 ? Math.max(...verses.map(v => v.id)) + 1 : 1));
+                        }
+                    }
+                    
+                    // دمج الصور القديمة (التي لم يتم حذفها) مع الجديدة
+                    const finalImages = [
+                        ...currentImageUrls.filter(url => typeof url === 'string'),
+                        ...newImageUrls
+                    ];
+
+                    // إذا كان في وضع التعديل
+                    if (isEditMode) {
+                        const index = verses.findIndex(v => v.id === currentEditId);
+                        if (index !== -1) {
+                            // حذف الصور القديمة التي تم إزالتها من السحابة إذا كان المستخدم مسجل الدخول
+                            const oldVerse = verses[index];
+                            if (oldVerse.images && oldVerse.images.length > 0 && currentUser) {
+                                const imagesToDelete = oldVerse.images.filter(oldUrl => 
+                                    typeof oldUrl === 'string' && 
+                                    oldUrl.startsWith('http') &&
+                                    !finalImages.some(newUrl => newUrl === oldUrl)
+                                );
+                                if (imagesToDelete.length > 0) {
+                                    await deleteImages(imagesToDelete);
+                                }
+                            }
+                            
+                            verses[index] = {
+                                id: currentEditId,
+                                text: verseText,
+                                name: verseName,
+                                surah: surahName,
+                                numbers: verseNumbers,
+                                status: verseStatus,
+                                images: finalImages
+                            };
+                        }
+                    } else {
+                        // إضافة آية جديدة
+                        const newId = verses.length > 0 ? Math.max(...verses.map(v => v.id)) + 1 : 1;
                         
-                        verses[index] = {
-                            id: currentEditId,
+                        verses.push({
+                            id: newId,
                             text: verseText,
                             name: verseName,
                             surah: surahName,
                             numbers: verseNumbers,
                             status: verseStatus,
                             images: finalImages
-                        };
+                        });
                     }
-                } else {
-                    // إضافة آية جديدة
-                    const newId = verses.length > 0 ? Math.max(...verses.map(v => v.id)) + 1 : 1;
                     
-                    verses.push({
-                        id: newId,
-                        text: verseText,
-                        name: verseName,
-                        surah: surahName,
-                        numbers: verseNumbers,
-                        status: verseStatus,
-                        images: newImageUrls
-                    });
+                    saveVersesToLocal();
+                    renderVerses(verses);
+                    closeVerseModal();
+                } catch (error) {
+                    console.error('Error saving verse:', error);
+                    alert('حدث خطأ أثناء حفظ الآية. الرجاء المحاولة مرة أخرى.');
+                } finally {
+                    saveBtn.innerHTML = originalBtnText;
+                    saveBtn.disabled = false;
                 }
-                
-                saveVersesToLocal();
-                renderVerses(verses);
-                closeVerseModal();
             }
             
             // حذف آية
@@ -1166,7 +1269,7 @@
                         setTimeout(() => {
                             closeAuthModal();
                             updateAuthUI();
-                            fetchData(); // جلب البيانات بعد تسجيل الدخول
+                            fetchData();
                         }, 1000);
                     })
                     .catch((error) => {
@@ -1205,7 +1308,6 @@
                 const versesRef = database.ref(`users/${userId}/verses`);
                 
                 try {
-                    // رفع البيانات إلى Firebase
                     await versesRef.set(verses);
                     
                     syncStatus.textContent = 'تمت المزامنة';
@@ -1306,21 +1408,16 @@
                 const files = e.target.files;
                 if (files && files.length > 0) {
                     currentImageFiles = Array.from(files);
-                    currentImageUrls = [];
-                    
-                    Array.from(files).forEach((file, index) => {
-                        const reader = new FileReader();
-                        
-                        reader.onload = function(event) {
-                            currentImageUrls.push(event.target.result);
-                            if (currentImageUrls.length === files.length) {
-                                renderImagePreviews();
-                            }
-                        };
-                        
-                        reader.readAsDataURL(file);
-                    });
+                    renderImagePreviews();
                 }
+            });
+
+            // منع تكبير الصفحة عند التركيز على الحقول
+            document.querySelectorAll('input, textarea, select').forEach(el => {
+                el.addEventListener('focus', function() {
+                    window.scrollTo(0, 0);
+                    document.body.style.zoom = "1";
+                });
             });
             
             // متابعة حالة المصادقة
