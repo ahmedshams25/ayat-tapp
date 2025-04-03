@@ -527,6 +527,13 @@
             cursor: pointer;
         }
 
+        .review-info {
+            font-size: 12px;
+            color: var(--text-color);
+            opacity: 0.7;
+            margin-top: 5px;
+        }
+
         @media (max-width: 768px) {
             .verse-list {
                 grid-template-columns: 1fr;
@@ -800,6 +807,7 @@
             let currentImageUrls = [];
             let currentViewingImages = [];
             let currentImageIndex = 0;
+            let syncInterval = null;
 
             // تحميل البيانات من localStorage
             function loadVerses() {
@@ -820,7 +828,7 @@
                 updateStats();
             }
             
-            // عرض الآيات
+            // عرض الآيات (مع عرض الأحدث أولاً)
             function renderVerses(versesToRender) {
                 verseList.innerHTML = '';
                 
@@ -828,7 +836,9 @@
                     emptyState.style.display = 'block';
                 } else {
                     emptyState.style.display = 'none';
-                    versesToRender.forEach(verse => {
+                    
+                    // عرض الآيات بترتيب عكسي (الأحدث أولاً)
+                    versesToRender.slice().reverse().forEach(verse => {
                         const verseCard = document.createElement('div');
                         verseCard.className = `verse-card ${verse.status}`;
                         
@@ -846,6 +856,14 @@
                             `;
                         }
                         
+                        // معلومات المراجعة
+                        let reviewInfo = '';
+                        if (verse.reviews && verse.reviews.length > 0) {
+                            const lastReview = verse.reviews[verse.reviews.length - 1];
+                            const reviewDate = new Date(lastReview.date).toLocaleDateString('ar-EG');
+                            reviewInfo = `<div class="review-info">آخر مراجعة: ${reviewDate} (${lastReview.status === 'memorized' ? 'تم الحفظ' : 'قيد الحفظ'})</div>`;
+                        }
+                        
                         verseCard.innerHTML = `
                             <div class="verse-header">
                                 <div>
@@ -858,6 +876,7 @@
                             </div>
                             <div class="verse-text">${verse.text}</div>
                             ${imagesHTML}
+                            ${reviewInfo}
                             <div class="verse-actions">
                                 <div class="action-btns">
                                     <button class="action-btn edit-btn" data-id="${verse.id}">
@@ -1124,8 +1143,19 @@
                     if (isEditMode) {
                         const index = verses.findIndex(v => v.id === currentEditId);
                         if (index !== -1) {
-                            // حذف الصور القديمة التي تم إزالتها من السحابة إذا كان المستخدم مسجل الدخول
                             const oldVerse = verses[index];
+                            const statusChanged = oldVerse.status !== verseStatus;
+                            
+                            // تحديث سجل المراجعة إذا تغيرت الحالة
+                            const reviews = oldVerse.reviews || [];
+                            if (statusChanged) {
+                                reviews.push({
+                                    date: new Date().toISOString(),
+                                    status: verseStatus
+                                });
+                            }
+                            
+                            // حذف الصور القديمة التي تم إزالتها من السحابة إذا كان المستخدم مسجل الدخول
                             if (oldVerse.images && oldVerse.images.length > 0 && currentUser) {
                                 const imagesToDelete = oldVerse.images.filter(oldUrl => 
                                     typeof oldUrl === 'string' && 
@@ -1138,13 +1168,14 @@
                             }
                             
                             verses[index] = {
-                                id: currentEditId,
+                                ...oldVerse,
                                 text: verseText,
                                 name: verseName,
                                 surah: surahName,
                                 numbers: verseNumbers,
                                 status: verseStatus,
-                                images: finalImages
+                                images: finalImages,
+                                reviews: reviews
                             };
                         }
                     } else {
@@ -1158,7 +1189,11 @@
                             surah: surahName,
                             numbers: verseNumbers,
                             status: verseStatus,
-                            images: finalImages
+                            images: finalImages,
+                            reviews: [{
+                                date: new Date().toISOString(),
+                                status: verseStatus
+                            }]
                         });
                     }
                     
@@ -1197,7 +1232,19 @@
             function toggleVerseStatus(id) {
                 const verse = verses.find(v => v.id === id);
                 if (verse) {
-                    verse.status = verse.status === 'memorized' ? 'pending' : 'memorized';
+                    const newStatus = verse.status === 'memorized' ? 'pending' : 'memorized';
+                    verse.status = newStatus;
+                    
+                    // تحديث سجل المراجعة
+                    if (!verse.reviews) {
+                        verse.reviews = [];
+                    }
+                    
+                    verse.reviews.push({
+                        date: new Date().toISOString(),
+                        status: newStatus
+                    });
+                    
                     saveVersesToLocal();
                     renderVerses(verses);
                 }
@@ -1270,6 +1317,12 @@
                             closeAuthModal();
                             updateAuthUI();
                             fetchData();
+                            
+                            // بدء المزامنة التلقائية كل 5 ثواني
+                            if (syncInterval) {
+                                clearInterval(syncInterval);
+                            }
+                            syncInterval = setInterval(syncData, 5000);
                         }, 1000);
                     })
                     .catch((error) => {
@@ -1290,6 +1343,12 @@
                     loginBtn.classList.remove('btn-danger');
                     loginBtn.classList.add('btn-primary');
                     syncBtn.style.display = 'none';
+                    
+                    // إيقاف المزامنة التلقائية عند تسجيل الخروج
+                    if (syncInterval) {
+                        clearInterval(syncInterval);
+                        syncInterval = null;
+                    }
                 }
             }
             
@@ -1426,6 +1485,15 @@
                 updateAuthUI();
                 if (user) {
                     fetchData();
+                    
+                    // بدء المزامنة التلقائية كل 5 ثواني
+                    if (syncInterval) {
+                        clearInterval(syncInterval);
+                    }
+                    syncInterval = setInterval(syncData, 5000);
+                } else if (syncInterval) {
+                    clearInterval(syncInterval);
+                    syncInterval = null;
                 }
             });
             
