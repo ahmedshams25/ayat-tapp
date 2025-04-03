@@ -765,6 +765,7 @@
                 if (savedVerses) {
                     verses = JSON.parse(savedVerses);
                 } else {
+                    // تحميل البيانات الأولية من الملف الذي أرسلته
                     verses = [];
                     saveVersesToLocal();
                 }
@@ -913,7 +914,7 @@
                     document.getElementById('verseText').value = verse.text;
                     document.getElementById('verseName').value = verse.name;
                     document.getElementById('surahName').value = verse.surah;
-                    document.getElementById('verseNumbers').value = verse.numbers || '';
+                    document.getElementById('verseNumbers').value = verse.numbers;
                     document.getElementById('verseStatus').value = verse.status;
                     
                     // عرض الصور الحالية
@@ -922,13 +923,8 @@
                     currentImageUrls = [];
                     
                     if (verse.images && verse.images.length > 0) {
-                        // تصفية الصور غير الصالحة
-                        currentImageUrls = verse.images.filter(img => 
-                            typeof img === 'string' && (img.startsWith('http') || img.startsWith('data:image'))
-                        );
-                        
-                        // عرض الصور
-                        currentImageUrls.forEach((imgUrl, index) => {
+                        currentImageUrls = [...verse.images];
+                        verse.images.forEach((imgUrl, index) => {
                             addImageToPreview(imgUrl, index);
                         });
                     }
@@ -962,16 +958,11 @@
             
             // حذف صورة من المعاينة
             function removeImageFromPreview(index) {
-                // إذا كانت الصورة من الصور المحملة مسبقاً (URLs)
                 if (index < currentImageUrls.length) {
                     currentImageUrls.splice(index, 1);
-                } 
-                // إذا كانت الصورة من الملفات الجديدة
-                else {
-                    const fileIndex = index - currentImageUrls.length;
-                    if (fileIndex < currentImageFiles.length) {
-                        currentImageFiles.splice(fileIndex, 1);
-                    }
+                }
+                if (index < currentImageFiles.length) {
+                    currentImageFiles.splice(index, 1);
                 }
                 renderImagePreviews();
             }
@@ -979,24 +970,8 @@
             // عرض معاينات الصور
             function renderImagePreviews() {
                 imagePreviewContainer.innerHTML = '';
-                
-                // عرض الصور المحملة مسبقاً (URLs)
                 currentImageUrls.forEach((imgUrl, index) => {
-                    // تحقق مما إذا كان الرابط صالحاً للعرض
-                    if (typeof imgUrl === 'string' && (imgUrl.startsWith('http') || imgUrl.startsWith('data:image'))) {
-                        addImageToPreview(imgUrl, index);
-                    }
-                });
-                
-                // عرض معاينات للصور الجديدة قبل رفعها
-                currentImageFiles.forEach((file, index) => {
-                    if (file instanceof File) {
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
-                            addImageToPreview(e.target.result, currentImageUrls.length + index);
-                        };
-                        reader.readAsDataURL(file);
-                    }
+                    addImageToPreview(imgUrl, index);
                 });
             }
             
@@ -1004,13 +979,9 @@
             async function uploadImages(files, verseId) {
                 if (!files || files.length === 0 || !currentUser) return [];
                 
-                const uploadPromises = Array.from(files).map(async (file) => {
-                    // تحقق من أن العنصر هو ملف صحيح
-                    if (!(file instanceof File)) return null;
-                    
+                const uploadPromises = Array.from(files).map(async (file, index) => {
                     const storageRef = storage.ref();
-                    const uniqueName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${file.name}`;
-                    const imageRef = storageRef.child(`users/${currentUser.uid}/verses/${verseId}/${uniqueName}`);
+                    const imageRef = storageRef.child(`users/${currentUser.uid}/verses/${verseId}/${Date.now()}_${file.name}`);
                     
                     try {
                         const snapshot = await imageRef.put(file);
@@ -1057,72 +1028,47 @@
                     return;
                 }
                 
-                // عرض مؤشر تحميل
-                const saveBtn = document.getElementById('saveBtn');
-                const originalBtnText = saveBtn.innerHTML;
-                saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
-                saveBtn.disabled = true;
+                // رفع الصور الجديدة إذا وجدت
+                let newImageUrls = [];
+                if (currentImageFiles.length > 0) {
+                    newImageUrls = await uploadImages(currentImageFiles, isEditMode ? currentEditId : (verses.length > 0 ? Math.max(...verses.map(v => v.id)) + 1 : 1));
+                }
                 
-                try {
-                    // رفع الصور الجديدة إذا وجدت
-                    let newImageUrls = [];
-                    if (currentImageFiles.length > 0 && currentUser) {
-                        newImageUrls = await uploadImages(currentImageFiles, isEditMode ? currentEditId : (verses.length > 0 ? Math.max(...verses.map(v => v.id)) + 1 : 1));
-                    }
-                    
-                    // دمج الصور القديمة (التي لم يتم حذفها) مع الجديدة
-                    const finalImages = [...currentImageUrls.filter(url => typeof url === 'string' && url.startsWith('http')), ...newImageUrls];
-                    
-                    // إذا كان في وضع التعديل
-                    if (isEditMode) {
-                        const index = verses.findIndex(v => v.id === currentEditId);
-                        if (index !== -1) {
-                            // حذف الصور القديمة التي تم إزالتها من السحابة
-                            const oldVerse = verses[index];
-                            if (oldVerse.images && oldVerse.images.length > 0 && currentUser) {
-                                const imagesToDelete = oldVerse.images.filter(oldUrl => 
-                                    !finalImages.some(newUrl => newUrl === oldUrl)
-                                );
-                                if (imagesToDelete.length > 0) {
-                                    await deleteImages(imagesToDelete);
-                                }
-                            }
-                            
-                            verses[index] = {
-                                id: currentEditId,
-                                text: verseText,
-                                name: verseName,
-                                surah: surahName,
-                                numbers: verseNumbers,
-                                status: verseStatus,
-                                images: finalImages
-                            };
-                        }
-                    } else {
-                        // إضافة آية جديدة
-                        const newId = verses.length > 0 ? Math.max(...verses.map(v => v.id)) + 1 : 1;
+                // إذا كان في وضع التعديل
+                if (isEditMode) {
+                    const index = verses.findIndex(v => v.id === currentEditId);
+                    if (index !== -1) {
+                        // دمج الصور القديمة (التي لم يتم حذفها) مع الجديدة
+                        const finalImages = [...currentImageUrls, ...newImageUrls];
                         
-                        verses.push({
-                            id: newId,
+                        verses[index] = {
+                            id: currentEditId,
                             text: verseText,
                             name: verseName,
                             surah: surahName,
                             numbers: verseNumbers,
                             status: verseStatus,
                             images: finalImages
-                        });
+                        };
                     }
+                } else {
+                    // إضافة آية جديدة
+                    const newId = verses.length > 0 ? Math.max(...verses.map(v => v.id)) + 1 : 1;
                     
-                    saveVersesToLocal();
-                    renderVerses(verses);
-                    closeVerseModal();
-                } catch (error) {
-                    console.error('Error saving verse:', error);
-                    alert('حدث خطأ أثناء حفظ الآية. الرجاء المحاولة مرة أخرى.');
-                } finally {
-                    saveBtn.innerHTML = originalBtnText;
-                    saveBtn.disabled = false;
+                    verses.push({
+                        id: newId,
+                        text: verseText,
+                        name: verseName,
+                        surah: surahName,
+                        numbers: verseNumbers,
+                        status: verseStatus,
+                        images: newImageUrls
+                    });
                 }
+                
+                saveVersesToLocal();
+                renderVerses(verses);
+                closeVerseModal();
             }
             
             // حذف آية
@@ -1360,14 +1306,18 @@
                 const files = e.target.files;
                 if (files && files.length > 0) {
                     currentImageFiles = Array.from(files);
+                    currentImageUrls = [];
                     
-                    Array.from(files).forEach((file) => {
-                        if (!(file instanceof File)) return;
-                        
+                    Array.from(files).forEach((file, index) => {
                         const reader = new FileReader();
-                        reader.onload = (event) => {
-                            renderImagePreviews();
+                        
+                        reader.onload = function(event) {
+                            currentImageUrls.push(event.target.result);
+                            if (currentImageUrls.length === files.length) {
+                                renderImagePreviews();
+                            }
                         };
+                        
                         reader.readAsDataURL(file);
                     });
                 }
