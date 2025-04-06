@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>آيات - تطبيق حفظ القرآن الكريم</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-storage-compat.js"></script>
     <style>
         :root {
             --primary-color: #2c3e50;
@@ -218,7 +218,15 @@
             padding: 15px;
             box-shadow: var(--shadow);
             position: relative;
-            cursor: grab; /* Add a grab cursor for draggable items */
+            cursor: grab;
+            user-select: none;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .verse-card.dragging {
+            opacity: 0.5;
+            transform: scale(0.98);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
         }
 
         .verse-card.memorized {
@@ -413,25 +421,32 @@
             color: white;
         }
 
+        .review-info {
+            font-size: 12px;
+            color: var(--text-color);
+            opacity: 0.7;
+            margin-top: 5px;
+        }
+
         @media (max-width: 768px) {
             .verse-list {
                 grid-template-columns: 1fr;
             }
-
+            
             .controls {
                 flex-direction: column;
             }
-
+            
             .search-box {
                 width: 100%;
             }
-
+            
             header {
                 flex-direction: column;
                 gap: 15px;
                 align-items: flex-start;
             }
-
+            
             .auth-buttons {
                 width: 100%;
                 justify-content: space-between;
@@ -465,7 +480,7 @@
             font-size: var(--input-font-size) !important;
         }
 
-        button, .action-btn, .verse-image-thumbnail {
+        button, .action-btn {
             -webkit-tap-highlight-color: transparent;
             touch-action: manipulation;
         }
@@ -524,4 +539,686 @@
                 <i class="fas fa-search"></i>
             </div>
             <button class="btn btn-primary" id="addVerseBtn">
-                <i class="fas fa-
+                <i class="fas fa-plus"></i> إضافة آية جديدة
+            </button>
+        </div>
+
+        <div class="verse-list" id="verseList">
+            <!-- الآيات ستظهر هنا -->
+        </div>
+
+        <div class="empty-state" id="emptyState" style="display: none;">
+            <i class="fas fa-book-open"></i>
+            <p>لا توجد آيات لعرضها. ابدأ بإضافة آية جديدة.</p>
+        </div>
+    </div>
+
+    <!-- Modal لإضافة/تعديل آية -->
+    <div class="modal" id="verseModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modalTitle">إضافة آية جديدة</h3>
+                <button class="close-btn" id="closeModal">&times;</button>
+            </div>
+            <form id="verseForm">
+                <input type="hidden" id="verseId">
+                <div class="form-group">
+                    <label for="verseText">النص القرآني</label>
+                    <textarea id="verseText" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="verseName">اسم الآية أو الجزء</label>
+                    <input type="text" id="verseName" required>
+                </div>
+                <div class="form-group">
+                    <label for="surahName">اسم السورة</label>
+                    <input type="text" id="surahName" required>
+                </div>
+                <div class="form-group">
+                    <label for="verseNumbers">أرقام الآيات (من - إلى)</label>
+                    <input type="text" id="verseNumbers" placeholder="مثال: 1-5 أو 42">
+                </div>
+                <div class="form-group">
+                    <label for="verseStatus">حالة الحفظ</label>
+                    <select id="verseStatus" required>
+                        <option value="pending">قيد الحفظ</option>
+                        <option value="memorized">تم الحفظ</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-danger" id="cancelBtn">إلغاء</button>
+                    <button type="submit" class="btn btn-success" id="saveBtn">حفظ</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal لتسجيل الدخول -->
+    <div class="modal auth-modal" id="authModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="authModalTitle">تسجيل الدخول</h3>
+                <button class="close-btn" id="closeAuthModal">&times;</button>
+            </div>
+            <form id="authForm">
+                <div class="form-group">
+                    <label for="email">البريد الإلكتروني</label>
+                    <input type="email" id="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">كلمة المرور</label>
+                    <input type="password" id="password" required>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-danger" id="cancelAuthBtn">إلغاء</button>
+                    <button type="submit" class="btn btn-success" id="authSubmitBtn">تسجيل الدخول</button>
+                </div>
+                <div id="authMessage" style="margin-top: 15px; text-align: center;"></div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Firebase configuration
+            const firebaseConfig = {
+                apiKey: "AIzaSyCoAixyqXO4nPapkhe0KUXGEJVgLZedHv4",
+                authDomain: "ayat-8d3d0.firebaseapp.com",
+                projectId: "ayat-8d3d0",
+                storageBucket: "ayat-8d3d0.appspot.com",
+                messagingSenderId: "201289603281",
+                appId: "1:201289603281:web:17f89c18272290a068cdf0",
+                measurementId: "G-0Y471DLJQK",
+                databaseURL: "https://ayat-8d3d0-default-rtdb.firebaseio.com"
+            };
+
+            // Initialize Firebase
+            const app = firebase.initializeApp(firebaseConfig);
+            const database = firebase.database();
+            const auth = firebase.auth();
+            
+            // عناصر DOM
+            const themeToggle = document.getElementById('themeToggle');
+            const verseList = document.getElementById('verseList');
+            const emptyState = document.getElementById('emptyState');
+            const addVerseBtn = document.getElementById('addVerseBtn');
+            const verseModal = document.getElementById('verseModal');
+            const closeModal = document.getElementById('closeModal');
+            const cancelBtn = document.getElementById('cancelBtn');
+            const verseForm = document.getElementById('verseForm');
+            const searchInput = document.getElementById('searchInput');
+            const modalTitle = document.getElementById('modalTitle');
+            const loginBtn = document.getElementById('loginBtn');
+            const syncBtn = document.getElementById('syncBtn');
+            const syncStatus = document.getElementById('syncStatus');
+            const authModal = document.getElementById('authModal');
+            const closeAuthModal = document.getElementById('closeAuthModal');
+            const cancelAuthBtn = document.getElementById('cancelAuthBtn');
+            const authForm = document.getElementById('authForm');
+            const authSubmitBtn = document.getElementById('authSubmitBtn');
+            const authMessage = document.getElementById('authMessage');
+            
+            // عناصر الإحصائيات
+            const totalVersesEl = document.getElementById('totalVerses');
+            const memorizedVersesEl = document.getElementById('memorizedVerses');
+            const pendingVersesEl = document.getElementById('pendingVerses');
+            const completionRateEl = document.getElementById('completionRate');
+            const memorizedProgress = document.getElementById('memorizedProgress');
+            const pendingProgress = document.getElementById('pendingProgress');
+            const completionProgress = document.getElementById('completionProgress');
+            
+            // بيانات التطبيق
+            let verses = [];
+            let isEditMode = false;
+            let currentEditId = null;
+            let currentUser = null;
+            let syncInterval = null;
+            let draggedVerse = null;
+
+            // تحميل البيانات من localStorage
+            function loadVerses() {
+                const savedVerses = localStorage.getItem('quranVerses');
+                if (savedVerses) {
+                    verses = JSON.parse(savedVerses);
+                } else {
+                    verses = [];
+                    saveVersesToLocal();
+                }
+                updateStats();
+                renderVerses(verses);
+            }
+            
+            // حفظ البيانات في localStorage
+            function saveVersesToLocal() {
+                localStorage.setItem('quranVerses', JSON.stringify(verses));
+                updateStats();
+            }
+            
+            // عرض الآيات (مع عرض الأحدث أولاً)
+            function renderVerses(versesToRender) {
+                verseList.innerHTML = '';
+                
+                if (versesToRender.length === 0) {
+                    emptyState.style.display = 'block';
+                } else {
+                    emptyState.style.display = 'none';
+                    
+                    versesToRender.forEach((verse, index) => {
+                        const verseCard = document.createElement('div');
+                        verseCard.className = `verse-card ${verse.status}`;
+                        verseCard.setAttribute('data-id', verse.id);
+                        verseCard.setAttribute('draggable', 'true');
+                        
+                        // معلومات المراجعة
+                        let reviewInfo = '';
+                        if (verse.reviews && verse.reviews.length > 0) {
+                            const lastReview = verse.reviews[verse.reviews.length - 1];
+                            const reviewDate = new Date(lastReview.date).toLocaleDateString('ar-EG');
+                            reviewInfo = `<div class="review-info">آخر مراجعة: ${reviewDate} (${lastReview.status === 'memorized' ? 'تم الحفظ' : 'قيد الحفظ'})</div>`;
+                        }
+                        
+                        verseCard.innerHTML = `
+                            <div class="verse-header">
+                                <div>
+                                    <div class="verse-title">${verse.name}</div>
+                                    <div class="verse-surah">${verse.surah} ${verse.numbers ? `(${verse.numbers})` : ''}</div>
+                                </div>
+                                <span class="verse-status ${verse.status === 'memorized' ? 'status-memorized' : 'status-pending'}">
+                                    ${verse.status === 'memorized' ? 'تم الحفظ' : 'قيد الحفظ'}
+                                </span>
+                            </div>
+                            <div class="verse-text">${verse.text}</div>
+                            ${reviewInfo}
+                            <div class="verse-actions">
+                                <div class="action-btns">
+                                    <button class="action-btn edit-btn" data-id="${verse.id}">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button class="action-btn delete-btn" data-id="${verse.id}">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                    <button class="action-btn status-btn" data-id="${verse.id}">
+                                        <i class="fas ${verse.status === 'memorized' ? 'fa-undo' : 'fa-check'}"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                        
+                        verseList.appendChild(verseCard);
+                    });
+                    
+                    // إضافة event listeners للأزرار
+                    document.querySelectorAll('.edit-btn').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const id = parseInt(e.currentTarget.getAttribute('data-id'));
+                            editVerse(id);
+                        });
+                    });
+                    
+                    document.querySelectorAll('.delete-btn').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const id = parseInt(e.currentTarget.getAttribute('data-id'));
+                            deleteVerse(id);
+                        });
+                    });
+                    
+                    document.querySelectorAll('.status-btn').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const id = parseInt(e.currentTarget.getAttribute('data-id'));
+                            toggleVerseStatus(id);
+                        });
+                    });
+
+                    // إضافة event listeners للسحب والإفلات
+                    setupDragAndDrop();
+                }
+            }
+
+            // إعداد خاصية السحب والإفلات
+            function setupDragAndDrop() {
+                const verseCards = document.querySelectorAll('.verse-card');
+                
+                verseCards.forEach(card => {
+                    card.addEventListener('dragstart', handleDragStart);
+                    card.addEventListener('dragover', handleDragOver);
+                    card.addEventListener('dragenter', handleDragEnter);
+                    card.addEventListener('dragleave', handleDragLeave);
+                    card.addEventListener('drop', handleDrop);
+                    card.addEventListener('dragend', handleDragEnd);
+                });
+            }
+
+            function handleDragStart(e) {
+                draggedVerse = e.target;
+                e.target.classList.add('dragging');
+                e.dataTransfer.setData('text/plain', e.target.getAttribute('data-id'));
+                e.dataTransfer.effectAllowed = 'move';
+            }
+
+            function handleDragOver(e) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+            }
+
+            function handleDragEnter(e) {
+                e.preventDefault();
+                if (e.target.classList.contains('verse-card') {
+                    e.target.classList.add('drag-over');
+                }
+            }
+
+            function handleDragLeave(e) {
+                if (e.target.classList.contains('verse-card')) {
+                    e.target.classList.remove('drag-over');
+                }
+            }
+
+            function handleDrop(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const targetVerse = e.target.closest('.verse-card');
+                if (!targetVerse || !draggedVerse || targetVerse === draggedVerse) {
+                    return;
+                }
+                
+                const draggedId = parseInt(draggedVerse.getAttribute('data-id'));
+                const targetId = parseInt(targetVerse.getAttribute('data-id'));
+                
+                // إعادة ترتيب الآيات
+                const draggedIndex = verses.findIndex(v => v.id === draggedId);
+                const targetIndex = verses.findIndex(v => v.id === targetId);
+                
+                if (draggedIndex !== -1 && targetIndex !== -1) {
+                    // إزالة العنصر المسحوب
+                    const [removed] = verses.splice(draggedIndex, 1);
+                    // إدراجه في الموضع الجديد
+                    verses.splice(targetIndex, 0, removed);
+                    
+                    saveVersesToLocal();
+                    renderVerses(verses);
+                }
+            }
+
+            function handleDragEnd(e) {
+                e.target.classList.remove('dragging');
+                const verseCards = document.querySelectorAll('.verse-card');
+                verseCards.forEach(card => card.classList.remove('drag-over'));
+                draggedVerse = null;
+            }
+            
+            // تحديث الإحصائيات
+            function updateStats() {
+                const total = verses.length;
+                const memorized = verses.filter(v => v.status === 'memorized').length;
+                const pending = total - memorized;
+                const completionRate = total > 0 ? Math.round((memorized / total) * 100) : 0;
+                
+                totalVersesEl.textContent = total;
+                memorizedVersesEl.textContent = memorized;
+                pendingVersesEl.textContent = pending;
+                completionRateEl.textContent = `${completionRate}%`;
+                
+                memorizedProgress.style.width = `${(memorized / total) * 100}%`;
+                pendingProgress.style.width = `${(pending / total) * 100}%`;
+                completionProgress.style.width = `${completionRate}%`;
+            }
+            
+            // فتح Modal لإضافة آية
+            function openAddVerseModal() {
+                isEditMode = false;
+                currentEditId = null;
+                modalTitle.textContent = 'إضافة آية جديدة';
+                verseForm.reset();
+                verseModal.style.display = 'flex';
+                document.getElementById('verseText').focus();
+            }
+            
+            // فتح Modal لتعديل آية
+            function editVerse(id) {
+                const verse = verses.find(v => v.id === id);
+                if (verse) {
+                    isEditMode = true;
+                    currentEditId = id;
+                    modalTitle.textContent = 'تعديل آية';
+                    
+                    document.getElementById('verseId').value = verse.id;
+                    document.getElementById('verseText').value = verse.text;
+                    document.getElementById('verseName').value = verse.name;
+                    document.getElementById('surahName').value = verse.surah;
+                    document.getElementById('verseNumbers').value = verse.numbers || '';
+                    document.getElementById('verseStatus').value = verse.status;
+                    
+                    verseModal.style.display = 'flex';
+                }
+            }
+            
+            // حفظ آية (إضافة/تعديل)
+            async function saveVerse(e) {
+                e.preventDefault();
+                
+                const verseText = document.getElementById('verseText').value.trim();
+                const verseName = document.getElementById('verseName').value.trim();
+                const surahName = document.getElementById('surahName').value.trim();
+                const verseNumbers = document.getElementById('verseNumbers').value.trim();
+                const verseStatus = document.getElementById('verseStatus').value;
+                
+                if (!verseText || !verseName || !surahName) {
+                    alert('الرجاء إدخال النص القرآني واسم الآية واسم السورة');
+                    return;
+                }
+                
+                // عرض مؤشر تحميل
+                const saveBtn = document.getElementById('saveBtn');
+                const originalBtnText = saveBtn.innerHTML;
+                saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+                saveBtn.disabled = true;
+                
+                try {
+                    // إذا كان في وضع التعديل
+                    if (isEditMode) {
+                        const index = verses.findIndex(v => v.id === currentEditId);
+                        if (index !== -1) {
+                            const oldVerse = verses[index];
+                            const statusChanged = oldVerse.status !== verseStatus;
+                            
+                            // تحديث سجل المراجعة إذا تغيرت الحالة
+                            const reviews = oldVerse.reviews || [];
+                            if (statusChanged) {
+                                reviews.push({
+                                    date: new Date().toISOString(),
+                                    status: verseStatus
+                                });
+                            }
+                            
+                            verses[index] = {
+                                ...oldVerse,
+                                text: verseText,
+                                name: verseName,
+                                surah: surahName,
+                                numbers: verseNumbers,
+                                status: verseStatus,
+                                reviews: reviews
+                            };
+                        }
+                    } else {
+                        // إضافة آية جديدة
+                        const newId = verses.length > 0 ? Math.max(...verses.map(v => v.id)) + 1 : 1;
+                        
+                        verses.push({
+                            id: newId,
+                            text: verseText,
+                            name: verseName,
+                            surah: surahName,
+                            numbers: verseNumbers,
+                            status: verseStatus,
+                            reviews: [{
+                                date: new Date().toISOString(),
+                                status: verseStatus
+                            }]
+                        });
+                    }
+                    
+                    saveVersesToLocal();
+                    renderVerses(verses);
+                    closeVerseModal();
+                } catch (error) {
+                    console.error('Error saving verse:', error);
+                    alert('حدث خطأ أثناء حفظ الآية. الرجاء المحاولة مرة أخرى.');
+                } finally {
+                    saveBtn.innerHTML = originalBtnText;
+                    saveBtn.disabled = false;
+                }
+            }
+            
+            // حذف آية
+            function deleteVerse(id) {
+                if (confirm('هل أنت متأكد من حذف هذه الآية؟')) {
+                    verses = verses.filter(v => v.id !== id);
+                    saveVersesToLocal();
+                    renderVerses(verses);
+                }
+            }
+            
+            // تغيير حالة الحفظ
+            function toggleVerseStatus(id) {
+                const verse = verses.find(v => v.id === id);
+                if (verse) {
+                    const newStatus = verse.status === 'memorized' ? 'pending' : 'memorized';
+                    verse.status = newStatus;
+                    
+                    // تحديث سجل المراجعة
+                    if (!verse.reviews) {
+                        verse.reviews = [];
+                    }
+                    
+                    verse.reviews.push({
+                        date: new Date().toISOString(),
+                        status: newStatus
+                    });
+                    
+                    saveVersesToLocal();
+                    renderVerses(verses);
+                }
+            }
+            
+            // إغلاق Modal
+            function closeVerseModal() {
+                verseModal.style.display = 'none';
+            }
+            
+            // البحث عن آيات
+            function searchVerses() {
+                const searchTerm = searchInput.value.toLowerCase();
+                if (searchTerm) {
+                    const filtered = verses.filter(verse => 
+                        verse.name.toLowerCase().includes(searchTerm) ||
+                        verse.text.toLowerCase().includes(searchTerm) ||
+                        verse.surah.toLowerCase().includes(searchTerm) ||
+                        (verse.numbers && verse.numbers.toLowerCase().includes(searchTerm))
+                    );
+                    renderVerses(filtered);
+                } else {
+                    renderVerses(verses);
+                }
+            }
+            
+            // تبديل الوضع الليلي/النهاري
+            function toggleTheme() {
+                const currentTheme = document.documentElement.getAttribute('data-theme');
+                const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
+                
+                const icon = themeToggle.querySelector('i');
+                icon.className = newTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+            }
+            
+            // تهيئة الوضع الليلي/النهاري
+            function initTheme() {
+                const savedTheme = localStorage.getItem('theme') || 'light';
+                document.documentElement.setAttribute('data-theme', savedTheme);
+                
+                const icon = themeToggle.querySelector('i');
+                icon.className = savedTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+            }
+            
+            // تسجيل الدخول
+            function handleLogin() {
+                const email = document.getElementById('email').value;
+                const password = document.getElementById('password').value;
+                
+                authMessage.textContent = 'جاري تسجيل الدخول...';
+                authMessage.style.color = 'var(--warning-color)';
+                
+                auth.signInWithEmailAndPassword(email, password)
+                    .then((userCredential) => {
+                        currentUser = userCredential.user;
+                        authMessage.textContent = 'تم تسجيل الدخول بنجاح!';
+                        authMessage.style.color = 'var(--success-color)';
+                        setTimeout(() => {
+                            closeAuthModal();
+                            updateAuthUI();
+                            fetchData();
+                            
+                            // بدء المزامنة التلقائية كل 5 ثواني
+                            if (syncInterval) {
+                                clearInterval(syncInterval);
+                            }
+                            syncInterval = setInterval(syncData, 5000);
+                        }, 1000);
+                    })
+                    .catch((error) => {
+                        authMessage.textContent = 'خطأ في تسجيل الدخول: ' + error.message;
+                        authMessage.style.color = 'var(--danger-color)';
+                    });
+            }
+            
+            // تحديث واجهة المستخدم حسب حالة المصادقة
+            function updateAuthUI() {
+                if (currentUser) {
+                    loginBtn.textContent = 'تسجيل الخروج';
+                    loginBtn.classList.remove('btn-primary');
+                    loginBtn.classList.add('btn-danger');
+                    syncBtn.style.display = 'flex';
+                } else {
+                    loginBtn.textContent = 'تسجيل الدخول';
+                    loginBtn.classList.remove('btn-danger');
+                    loginBtn.classList.add('btn-primary');
+                    syncBtn.style.display = 'none';
+                    
+                    // إيقاف المزامنة التلقائية عند تسجيل الخروج
+                    if (syncInterval) {
+                        clearInterval(syncInterval);
+                        syncInterval = null;
+                    }
+                }
+            }
+            
+            // مزامنة البيانات مع Firebase
+            async function syncData() {
+                if (!currentUser) {
+                    alert('يجب تسجيل الدخول أولاً للمزامنة');
+                    return;
+                }
+                
+                syncStatus.textContent = 'جاري المزامنة...';
+                syncStatus.className = 'sync-status sync-loading';
+                syncStatus.style.display = 'inline-block';
+                
+                const userId = currentUser.uid;
+                const versesRef = database.ref(`users/${userId}/verses`);
+                
+                try {
+                    await versesRef.set(verses);
+                    
+                    syncStatus.textContent = 'تمت المزامنة';
+                    syncStatus.className = 'sync-status sync-success';
+                    setTimeout(() => {
+                        syncStatus.style.display = 'none';
+                    }, 3000);
+                } catch (error) {
+                    syncStatus.textContent = 'خطأ في المزامنة';
+                    syncStatus.className = 'sync-status sync-error';
+                    console.error('Error syncing data:', error);
+                }
+            }
+            
+            // جلب البيانات من Firebase
+            async function fetchData() {
+                if (!currentUser) return;
+                
+                syncStatus.textContent = 'جاري جلب البيانات...';
+                syncStatus.className = 'sync-status sync-loading';
+                syncStatus.style.display = 'inline-block';
+                
+                const userId = currentUser.uid;
+                const versesRef = database.ref(`users/${userId}/verses`);
+                
+                try {
+                    const snapshot = await versesRef.once('value');
+                    const data = snapshot.val();
+                    
+                    if (data) {
+                        verses = data;
+                        saveVersesToLocal();
+                        renderVerses(verses);
+                        
+                        syncStatus.textContent = 'تم جلب البيانات';
+                        syncStatus.className = 'sync-status sync-success';
+                        setTimeout(() => {
+                            syncStatus.style.display = 'none';
+                        }, 3000);
+                    } else {
+                        syncStatus.textContent = 'لا توجد بيانات على السحابة';
+                        syncStatus.className = 'sync-status sync-warning';
+                        setTimeout(() => {
+                            syncStatus.style.display = 'none';
+                        }, 3000);
+                    }
+                } catch (error) {
+                    syncStatus.textContent = 'خطأ في جلب البيانات';
+                    syncStatus.className = 'sync-status sync-error';
+                    console.error('Error fetching data:', error);
+                }
+            }
+            
+            // Event Listeners
+            addVerseBtn.addEventListener('click', openAddVerseModal);
+            closeModal.addEventListener('click', closeVerseModal);
+            cancelBtn.addEventListener('click', closeVerseModal);
+            verseForm.addEventListener('submit', saveVerse);
+            searchInput.addEventListener('input', searchVerses);
+            themeToggle.addEventListener('click', toggleTheme);
+            loginBtn.addEventListener('click', () => {
+                if (currentUser) {
+                    auth.signOut().then(() => {
+                        currentUser = null;
+                        updateAuthUI();
+                    });
+                } else {
+                    authModal.style.display = 'flex';
+                }
+            });
+            syncBtn.addEventListener('click', syncData);
+            closeAuthModal.addEventListener('click', () => authModal.style.display = 'none');
+            cancelAuthBtn.addEventListener('click', () => authModal.style.display = 'none');
+            authForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                handleLogin();
+            });
+
+            // منع تكبير الصفحة عند التركيز على الحقول
+            document.querySelectorAll('input, textarea, select').forEach(el => {
+                el.addEventListener('focus', function() {
+                    window.scrollTo(0, 0);
+                    document.body.style.zoom = "1";
+                });
+            });
+            
+            // متابعة حالة المصادقة
+            auth.onAuthStateChanged((user) => {
+                currentUser = user;
+                updateAuthUI();
+                if (user) {
+                    fetchData();
+                    
+                    // بدء المزامنة التلقائية كل 5 ثواني
+                    if (syncInterval) {
+                        clearInterval(syncInterval);
+                    }
+                    syncInterval = setInterval(syncData, 5000);
+                } else if (syncInterval) {
+                    clearInterval(syncInterval);
+                    syncInterval = null;
+                }
+            });
+            
+            // تهيئة التطبيق
+            initTheme();
+            loadVerses();
+            updateAuthUI();
+        });
+    </script>
+</body>
+</html>
