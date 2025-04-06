@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>آيات - تطبيق حفظ القرآن الكريم</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
@@ -399,28 +398,6 @@
             display: none;
         }
 
-        .sync-status {
-            font-size: 12px;
-            padding: 5px;
-            border-radius: 3px;
-            margin-left: 10px;
-        }
-
-        .sync-success {
-            background-color: var(--success-color);
-            color: white;
-        }
-
-        .sync-error {
-            background-color: var(--danger-color);
-            color: white;
-        }
-
-        .sync-loading {
-            background-color: var(--warning-color);
-            color: white;
-        }
-
         .review-info {
             font-size: 12px;
             color: var(--text-color);
@@ -497,7 +474,6 @@
                 <button class="btn btn-primary" id="loginBtn">تسجيل الدخول</button>
                 <button class="btn btn-warning" id="syncBtn">
                     <i class="fas fa-sync-alt"></i> مزامنة
-                    <span id="syncStatus" class="sync-status" style="display: none;"></span>
                 </button>
                 <button class="theme-toggle" id="themeToggle">
                     <i class="fas fa-moon"></i>
@@ -638,7 +614,6 @@
             const auth = firebase.auth();
             
             // عناصر DOM
-            const themeToggle = document.getElementById('themeToggle');
             const verseList = document.getElementById('verseList');
             const emptyState = document.getElementById('emptyState');
             const addVerseBtn = document.getElementById('addVerseBtn');
@@ -646,11 +621,8 @@
             const closeModal = document.getElementById('closeModal');
             const cancelBtn = document.getElementById('cancelBtn');
             const verseForm = document.getElementById('verseForm');
-            const searchInput = document.getElementById('searchInput');
-            const modalTitle = document.getElementById('modalTitle');
             const loginBtn = document.getElementById('loginBtn');
             const syncBtn = document.getElementById('syncBtn');
-            const syncStatus = document.getElementById('syncStatus');
             const authModal = document.getElementById('authModal');
             const closeAuthModal = document.getElementById('closeAuthModal');
             const cancelAuthBtn = document.getElementById('cancelAuthBtn');
@@ -658,22 +630,12 @@
             const authSubmitBtn = document.getElementById('authSubmitBtn');
             const authMessage = document.getElementById('authMessage');
             
-            // عناصر الإحصائيات
-            const totalVersesEl = document.getElementById('totalVerses');
-            const memorizedVersesEl = document.getElementById('memorizedVerses');
-            const pendingVersesEl = document.getElementById('pendingVerses');
-            const completionRateEl = document.getElementById('completionRate');
-            const memorizedProgress = document.getElementById('memorizedProgress');
-            const pendingProgress = document.getElementById('pendingProgress');
-            const completionProgress = document.getElementById('completionProgress');
-            
             // بيانات التطبيق
             let verses = [];
             let isEditMode = false;
             let currentEditId = null;
             let currentUser = null;
             let syncInterval = null;
-            let draggedVerse = null;
 
             // تحميل البيانات من localStorage
             function loadVerses() {
@@ -702,7 +664,7 @@
                 }
             }
             
-            // عرض الآيات (مع عرض الأحدث أولاً)
+            // عرض الآيات
             function renderVerses(versesToRender) {
                 verseList.innerHTML = '';
                 
@@ -711,11 +673,11 @@
                 } else {
                     emptyState.style.display = 'none';
                     
-                    versesToRender.forEach((verse, index) => {
+                    versesToRender.forEach(verse => {
                         const verseCard = document.createElement('div');
                         verseCard.className = `verse-card ${verse.status}`;
-                        verseCard.setAttribute('data-id', verse.id);
                         verseCard.setAttribute('draggable', 'true');
+                        verseCard.setAttribute('data-id', verse.id);
                         
                         // معلومات المراجعة
                         let reviewInfo = '';
@@ -805,7 +767,6 @@
             }
 
             function handleDragStart(e) {
-                draggedVerse = e.target;
                 e.target.classList.add('dragging');
                 e.dataTransfer.setData('text/plain', e.target.getAttribute('data-id'));
                 e.dataTransfer.effectAllowed = 'move';
@@ -834,6 +795,8 @@
                 e.stopPropagation();
                 
                 const targetVerse = e.target.closest('.verse-card');
+                const draggedVerse = document.querySelector('.verse-card.dragging');
+                
                 if (!targetVerse || !draggedVerse || targetVerse === draggedVerse) {
                     return;
                 }
@@ -860,7 +823,6 @@
                 e.target.classList.remove('dragging');
                 const verseCards = document.querySelectorAll('.verse-card');
                 verseCards.forEach(card => card.classList.remove('drag-over'));
-                draggedVerse = null;
             }
             
             // تحديث الإحصائيات
@@ -884,7 +846,7 @@
             function openAddVerseModal() {
                 isEditMode = false;
                 currentEditId = null;
-                modalTitle.textContent = 'إضافة آية جديدة';
+                document.getElementById('modalTitle').textContent = 'إضافة آية جديدة';
                 verseForm.reset();
                 verseModal.style.display = 'flex';
                 document.getElementById('verseText').focus();
@@ -896,7 +858,7 @@
                 if (verse) {
                     isEditMode = true;
                     currentEditId = id;
-                    modalTitle.textContent = 'تعديل آية';
+                    document.getElementById('modalTitle').textContent = 'تعديل آية';
                     
                     document.getElementById('verseId').value = verse.id;
                     document.getElementById('verseText').value = verse.text;
@@ -1046,7 +1008,7 @@
                 document.documentElement.setAttribute('data-theme', newTheme);
                 localStorage.setItem('theme', newTheme);
                 
-                const icon = themeToggle.querySelector('i');
+                const icon = document.getElementById('themeToggle').querySelector('i');
                 icon.className = newTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
             }
             
@@ -1055,7 +1017,7 @@
                 const savedTheme = localStorage.getItem('theme') || 'light';
                 document.documentElement.setAttribute('data-theme', savedTheme);
                 
-                const icon = themeToggle.querySelector('i');
+                const icon = document.getElementById('themeToggle').querySelector('i');
                 icon.className = savedTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
             }
             
@@ -1119,115 +1081,52 @@
                 }
             }
             
-            // مزامنة البيانات مع Firebase
+            // مزامنة البيانات مع Firebase (صامتة)
             async function syncData() {
-                if (!currentUser) {
-                    alert('يجب تسجيل الدخول أولاً للمزامنة');
-                    return;
-                }
-                
-                syncStatus.textContent = 'جاري المزامنة...';
-                syncStatus.className = 'sync-status sync-loading';
-                syncStatus.style.display = 'inline-block';
-                
-                const userId = currentUser.uid;
-                const versesRef = database.ref(`users/${userId}/verses`);
+                if (!currentUser) return;
                 
                 try {
-                    await versesRef.set(verses);
-                    
-                    syncStatus.textContent = 'تمت المزامنة';
-                    syncStatus.className = 'sync-status sync-success';
-                    setTimeout(() => {
-                        syncStatus.style.display = 'none';
-                    }, 3000);
+                    await database.ref(`users/${currentUser.uid}/verses`).set(verses);
+                    console.log('تمت المزامنة التلقائية بنجاح');
                 } catch (error) {
-                    syncStatus.textContent = 'خطأ في المزامنة';
-                    syncStatus.className = 'sync-status sync-error';
-                    console.error('Error syncing data:', error);
+                    console.error('خطأ في المزامنة التلقائية:', error);
                 }
             }
             
-            // جلب البيانات من Firebase
+            // جلب البيانات من Firebase (صامتة)
             async function fetchData() {
                 if (!currentUser) return;
                 
-                syncStatus.textContent = 'جاري جلب البيانات...';
-                syncStatus.className = 'sync-status sync-loading';
-                syncStatus.style.display = 'inline-block';
-                
-                const userId = currentUser.uid;
-                const versesRef = database.ref(`users/${userId}/verses`);
-                
                 try {
-                    const snapshot = await versesRef.once('value');
+                    const snapshot = await database.ref(`users/${currentUser.uid}/verses`).once('value');
                     const data = snapshot.val();
                     
                     if (data) {
                         verses = data;
                         saveVersesToLocal();
                         renderVerses(verses);
-                        
-                        syncStatus.textContent = 'تم جلب البيانات';
-                        syncStatus.className = 'sync-status sync-success';
-                        setTimeout(() => {
-                            syncStatus.style.display = 'none';
-                        }, 3000);
-                    } else {
-                        syncStatus.textContent = 'لا توجد بيانات على السحابة';
-                        syncStatus.className = 'sync-status sync-warning';
-                        setTimeout(() => {
-                            syncStatus.style.display = 'none';
-                        }, 3000);
+                        console.log('تم جلب البيانات تلقائياً بنجاح');
                     }
                 } catch (error) {
-                    syncStatus.textContent = 'خطأ في جلب البيانات';
-                    syncStatus.className = 'sync-status sync-error';
-                    console.error('Error fetching data:', error);
+                    console.error('خطأ في جلب البيانات التلقائي:', error);
                 }
             }
             
-            // تهيئة Event Listeners
-            function initializeEventListeners() {
-                // زر إضافة آية جديدة
-                addVerseBtn.addEventListener('click', openAddVerseModal);
+            // المزامنة اليدوية (تظهر إشعاراً فقط عند الطلب)
+            syncBtn.addEventListener('click', async () => {
+                if (!currentUser) {
+                    alert('يجب تسجيل الدخول أولاً للمزامنة');
+                    return;
+                }
                 
-                // إغلاق modal الآية
-                closeModal.addEventListener('click', closeVerseModal);
-                cancelBtn.addEventListener('click', closeVerseModal);
-                
-                // حفظ الآية
-                verseForm.addEventListener('submit', saveVerse);
-                
-                // تسجيل الدخول/الخروج
-                loginBtn.addEventListener('click', () => {
-                    if (currentUser) {
-                        auth.signOut().then(() => {
-                            currentUser = null;
-                            updateAuthUI();
-                        });
-                    } else {
-                        authModal.style.display = 'flex';
-                    }
-                });
-                
-                // المزامنة
-                syncBtn.addEventListener('click', syncData);
-                
-                // إغلاق modal المصادقة
-                closeAuthModal.addEventListener('click', () => authModal.style.display = 'none');
-                cancelAuthBtn.addEventListener('click', () => authModal.style.display = 'none');
-                
-                // تسجيل الدخول
-                authForm.addEventListener('submit', handleLogin);
-                
-                // تغيير السمة
-                themeToggle.addEventListener('click', toggleTheme);
-                
-                // البحث
-                searchInput.addEventListener('input', searchVerses);
-            }
-            
+                try {
+                    await syncData();
+                    alert('تمت المزامنة بنجاح');
+                } catch (error) {
+                    alert('حدث خطأ أثناء المزامنة');
+                }
+            });
+
             // متابعة حالة المصادقة
             auth.onAuthStateChanged((user) => {
                 currentUser = user;
@@ -1245,12 +1144,40 @@
                     syncInterval = null;
                 }
             });
-            
+
             // تهيئة التطبيق
-            initTheme();
-            initializeEventListeners();
-            loadVerses();
-            updateAuthUI();
+            function initialize() {
+                // تهيئة الوضع الليلي/النهاري
+                initTheme();
+                
+                // تهيئة event listeners
+                addVerseBtn.addEventListener('click', openAddVerseModal);
+                closeModal.addEventListener('click', closeVerseModal);
+                cancelBtn.addEventListener('click', closeVerseModal);
+                verseForm.addEventListener('submit', saveVerse);
+                loginBtn.addEventListener('click', () => {
+                    if (currentUser) {
+                        auth.signOut().then(() => {
+                            currentUser = null;
+                            updateAuthUI();
+                        });
+                    } else {
+                        authModal.style.display = 'flex';
+                    }
+                });
+                closeAuthModal.addEventListener('click', () => authModal.style.display = 'none');
+                cancelAuthBtn.addEventListener('click', () => authModal.style.display = 'none');
+                authForm.addEventListener('submit', handleLogin);
+                document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+                document.getElementById('searchInput').addEventListener('input', searchVerses);
+                
+                // تحميل البيانات الأولية
+                loadVerses();
+                updateAuthUI();
+            }
+
+            // بدء التطبيق
+            initialize();
         });
     </script>
 </body>
